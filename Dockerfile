@@ -1,5 +1,5 @@
 # Base image with CUDA 12.2, cuDNN, and Ubuntu 22.04
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,11 +24,8 @@ RUN python3.10 -m pip install --upgrade pip
 # Set the working directory
 WORKDIR /workspace
 
-# Clone unitree_IL_lerobot repository with submodules
-RUN git clone --recurse-submodules https://github.com/unitreerobotics/unitree_IL_lerobot.git
-
-# Clone unitree_sdk2_python repository
-RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+COPY unitree_IL_lerobot /workspace/unitree_IL_lerobot
+COPY unitree_sdk2_python /workspace/unitree_sdk2_python
 
 # Install LeRobot (editable mode)
 RUN pip install -e unitree_IL_lerobot/unitree_lerobot/lerobot
