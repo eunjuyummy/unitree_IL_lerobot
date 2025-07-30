@@ -6,10 +6,10 @@ Script Json to Lerobot.
 # --robot_type  The type of the robot used in the dataset (e.g., Unitree_G1_Dex3, Unitree_Z1_Dual, Unitree_G1_Dex3)
 # --push_to_hub Whether or not to upload the dataset to Hugging Face Hub (true or false)
 
-python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
-    --raw-dir $HOME/datasets/g1_grabcube_double_hand \
-    --repo-id your_name/g1_grabcube_double_hand \
-    --robot_type Unitree_G1_Dex3 \ 
+python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py 
+    --raw-dir $HOME/datasets/g1_grabcube_double_hand 
+    --repo-id your_name/g1_grabcube_double_hand 
+    --robot_type Unitree_G1_Dex3
     --push_to_hub
 """
 import os
@@ -148,6 +148,9 @@ class JsonDataset:
                 image = cv2.imread(image_path)
                 if image is None:
                     raise RuntimeError(f"Failed to read image: {image_path}")
+
+                # Resize input image to 640×480 pixels before processing.
+                image = cv2.resize(image, (640, 480))  # (width, height)
 
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 images[image_key].append(image_rgb)
