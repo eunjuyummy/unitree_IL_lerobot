@@ -27,7 +27,7 @@ class Inspire_Controller:
     def __init__(self, left_hand_array, right_hand_array, dual_hand_data_lock=None, dual_hand_state_array=None,
                  dual_hand_action_array=None, fps=100.0, Unit_Test=False, network_interface=""): # Added network_interface
         print("Initialize Inspire_Controller...")
-        self.fps = fps
+        self.fps = 100.0 # Default FPS, can be overridden by argument
         self.Unit_Test = Unit_Test
 
         # Initialize DDS Channel Factory
@@ -266,8 +266,8 @@ class Inspire_Controller:
                 sleep_time = max(0, (1.0 / self.fps) - time_elapsed)
                 if sleep_time > 0:
                     time.sleep(sleep_time)
-                # else:
-                #     print(f"[Inspire_Controller] Warning: Control loop took too long: {time_elapsed*1000:.2f} ms")
+                else:
+                    print(f"[Inspire_Controller] Warning: Control loop took too long: {time_elapsed*1000:.2f} ms")
 
         except KeyboardInterrupt:
             print("[Inspire_Controller] Control process received KeyboardInterrupt. Exiting.")

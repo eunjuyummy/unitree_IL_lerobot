@@ -26,8 +26,8 @@ from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
 
 import logging_mp
 
-logging_mp.basicConfig(level=logging_mp.INFO)
-logger_mp = logging_mp.getLogger(__name__)
+logging_mp.basic_config(level=logging_mp.INFO)
+logger_mp = logging_mp.get_logger(__name__)
 
 # Configuration for robot arms
 ARM_CONFIG = {
@@ -76,7 +76,7 @@ def setup_image_client(args: argparse.Namespace) -> dict[str, Any]:
         img_config = {
             "fps": 30,
             "head_camera_type": "opencv",
-            "head_camera_image_shape": [480, 640],  # Head camera resolution
+            "head_camera_image_shape": [480, 848],  # Head camera resolution
             "head_camera_id_numbers": [0],
             "wrist_camera_type": "opencv",
             "wrist_camera_image_shape": [480, 640],  # Wrist camera resolution
@@ -86,7 +86,7 @@ def setup_image_client(args: argparse.Namespace) -> dict[str, Any]:
         img_config = {
             "fps": 30,
             "head_camera_type": "opencv",
-            "head_camera_image_shape": [480, 1280],  # Head camera resolution
+            "head_camera_image_shape": [480, 848],  # Head camera resolution
             "head_camera_id_numbers": [0],
             "wrist_camera_type": "opencv",
             "wrist_camera_image_shape": [480, 640],  # Wrist camera resolution
@@ -196,10 +196,36 @@ def setup_robot_interface(args: argparse.Namespace) -> dict[str, Any]:
             touch_arr = Array("d", spec["touch_size"], lock=False)
             force_arr = Array("d", out_len, lock=False)  # assuming force has same size as state
 
-        if ee_key == "inspire1" and touch_arr is not None:
-            ee_ctrl = spec["controller"](left_in, right_in, data_lock, state_arr, action_arr, touch_arr, force_arr, simulation_mode=is_sim)
-        else:
-            ee_ctrl = spec["controller"](left_in, right_in, data_lock, state_arr, action_arr, simulation_mode=is_sim)
+        # Instantiate end-effector controller without forcing unsupported kwargs.
+        # Some controller constructors (e.g., Inspire_Controller) do not accept
+        # `simulation_mode` or extra touch/force args in their signature. Create
+        # the controller with the common positional args and then set
+        # `simulation_mode` attribute if the instance supports it.
+        try:
+            if ee_key == "inspire1" and touch_arr is not None:
+                ee_ctrl = spec["controller"](left_in, right_in, data_lock, state_arr, action_arr, touch_arr, force_arr)
+            else:
+                ee_ctrl = spec["controller"](left_in, right_in, data_lock, state_arr, action_arr)
+        except TypeError:
+            # Fallback: try without touch/force even if provided
+            ee_ctrl = spec["controller"](left_in, right_in, data_lock, state_arr, action_arr)
+
+        # If the controller exposes a simulation_mode attribute, set it.
+        if hasattr(ee_ctrl, "simulation_mode"):
+            try:
+                setattr(ee_ctrl, "simulation_mode", is_sim)
+            except Exception:
+                pass
+
+        # Defensive: ensure `fps` is a numeric float. Some controllers may
+        # have received non-numeric positional args in older code paths and
+        # ended up with an Array assigned to `fps`. Coerce to float or
+        # fallback to a sensible default.
+        if hasattr(ee_ctrl, "fps"):
+            try:
+                ee_ctrl.fps = float(ee_ctrl.fps)
+            except Exception:
+                ee_ctrl.fps = 100.0
 
         ee_shared_mem = {
             "left": left_in,
@@ -263,12 +289,8 @@ def process_images_and_observations(
     if has_wrist_cam and current_wrist_image is not None:
         left_wrist_cam = current_wrist_image[:, : wrist_img_shape[1] // 2]
         right_wrist_cam = current_wrist_image[:, wrist_img_shape[1] // 2 :]
-    observation = {
-        "observation.images.cam_left_high": torch.from_numpy(left_top_cam),
-        "observation.images.cam_right_high": torch.from_numpy(right_top_cam) if is_binocular else None,
-        "observation.images.cam_left_wrist": torch.from_numpy(left_wrist_cam) if has_wrist_cam else None,
-        "observation.images.cam_right_wrist": torch.from_numpy(right_wrist_cam) if has_wrist_cam else None,
-    }
+    # Use only the primary left/top camera for observation to match single-camera usage.
+    observation = {"observation.images.cam_left_high": torch.from_numpy(left_top_cam)}
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 
     return observation, current_arm_q

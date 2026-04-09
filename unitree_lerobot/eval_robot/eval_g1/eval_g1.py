@@ -31,6 +31,10 @@ from unitree_lerobot.eval_robot.eval_g1.robot_control.robot_hand_unitree import 
 from unitree_lerobot.eval_robot.eval_g1.robot_control.robot_hand_inspire import Inspire_Controller
 from unitree_lerobot.eval_robot.eval_g1.eval_real_config import EvalRealConfig
 
+import logging_mp
+
+logging_mp.basic_config(level=logging_mp.INFO)
+logger_mp = logging_mp.get_logger(__name__)
 
 # copy from lerobot.common.robot_devices.control_utils import predict_action
 def predict_action(observation, policy, device, use_amp):

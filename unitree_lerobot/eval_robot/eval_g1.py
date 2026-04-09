@@ -14,6 +14,7 @@ from dataclasses import asdict
 from torch import nn
 from contextlib import nullcontext
 from typing import Any
+import copy as _copy
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.utils.utils import (
     get_safe_torch_device,
@@ -160,7 +161,10 @@ def eval_policy(
                 # Maintain frequency
                 time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
     except Exception as e:
-        logger_mp.info(f"An error occurred: {e}")
+        try:
+            logger_mp.info(f"An error occurred: {e}")
+        except Exception:
+            logging.info(f"An error occurred: {e}")
     finally:
         if image_info:
             cleanup_resources(image_info)
@@ -180,7 +184,41 @@ def eval_main(cfg: EvalRealConfig):
 
     dataset = LeRobotDataset(repo_id=cfg.repo_id)
 
-    policy = make_policy(cfg=cfg.policy, ds_meta=dataset.meta)
+    try:
+        policy = make_policy(cfg=cfg.policy, ds_meta=dataset.meta)
+    except ValueError as e:
+        msg = str(e)
+        # If the policy expects generic camera keys (camera1, camera2, ...) but the dataset
+        # uses different names (e.g. cam_left_high), try to remap dataset feature keys
+        # to generic camera names and retry policy creation.
+        if "Missing features" in msg and "Extra features" in msg:
+            # Build a temporary copy of dataset.meta and remap only that copy's
+            # observation image feature keys to the generic camera names so that
+            # policy creation can be retried without mutating the real dataset
+            # metadata (which other code relies on, e.g. video timestamps).
+            tmp_meta = _copy.deepcopy(dataset.meta)
+            try:
+                features = tmp_meta.info.get("features", {})
+                new_features = {}
+                cam_idx = 1
+                for k, v in features.items():
+                    if k.startswith("observation.images."):
+                        new_key = f"observation.images.camera{cam_idx}"
+                        new_features[new_key] = v
+                        cam_idx += 1
+                    else:
+                        new_features[k] = v
+
+                tmp_meta.info["features"] = new_features
+
+                # retry policy creation using the temporary meta only
+                policy = make_policy(cfg=cfg.policy, ds_meta=tmp_meta)
+            except Exception:
+                # If retry fails, re-raise the original error
+                raise e
+        else:
+            raise
+
     policy.eval()
 
     preprocessor, postprocessor = make_pre_post_processors(

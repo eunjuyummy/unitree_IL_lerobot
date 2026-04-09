@@ -163,10 +163,38 @@ class ImageClient:
                     continue
 
                 if self.tv_enable_shm:
-                    np.copyto(self.tv_img_array, np.array(current_image[:, : self.tv_img_shape[1]]))
+                    # Ensure the received image matches expected shared-memory shape.
+                    exp_h, exp_w, exp_c = self.tv_img_shape
+                    h, w = current_image.shape[:2]
+                    if (h, w) != (exp_h, exp_w):
+                        try:
+                            resized = cv2.resize(current_image, (exp_w, exp_h))
+                        except Exception:
+                            # Fallback: pad or crop without interpolation
+                            resized = np.zeros((exp_h, exp_w, 3), dtype=np.uint8)
+                            h_min = min(h, exp_h)
+                            w_min = min(w, exp_w)
+                            resized[:h_min, :w_min] = current_image[:h_min, :w_min]
+                        np.copyto(self.tv_img_array, resized)
+                    else:
+                        np.copyto(self.tv_img_array, current_image)
 
                 if self.wrist_enable_shm:
-                    np.copyto(self.wrist_img_array, np.array(current_image[:, -self.wrist_img_shape[1] :]))
+                    exp_h, exp_w, exp_c = self.wrist_img_shape
+                    # extract wrist region from the right side of the incoming image if possible
+                    h, w = current_image.shape[:2]
+                    wrist_region = current_image[:, -exp_w:] if w >= exp_w else current_image
+                    if wrist_region.shape[:2] != (exp_h, exp_w):
+                        try:
+                            wrist_resized = cv2.resize(wrist_region, (exp_w, exp_h))
+                        except Exception:
+                            wrist_resized = np.zeros((exp_h, exp_w, 3), dtype=np.uint8)
+                            h_min = min(wrist_region.shape[0], exp_h)
+                            w_min = min(wrist_region.shape[1], exp_w)
+                            wrist_resized[:h_min, :w_min] = wrist_region[:h_min, :w_min]
+                        np.copyto(self.wrist_img_array, wrist_resized)
+                    else:
+                        np.copyto(self.wrist_img_array, wrist_region)
 
                 if self._image_show:
                     height, width = current_image.shape[:2]

@@ -8,6 +8,8 @@ def tactile_as_image(key: str, tactile_data: np.array, robot_type: str = "Unitre
     tactile_dict = {}
 
     prefix = key.split('_')[0]
+    if robot_type not in ROBOT_CONFIGS:
+        raise ValueError(f"Unknown robot_type '{robot_type}'. Available robot types: {list(ROBOT_CONFIGS.keys())}")
     sub_keys = ROBOT_CONFIGS[robot_type].tactile_to_image_shape
     idx = 0
     for sub_key, (channel, height, width) in sub_keys.items():
@@ -26,6 +28,8 @@ def tactile_as_state(key: str, tactile_data: np.array, robot_type: str = "Unitre
     state_dict = {}
 
     prefix = key.split('_')[0]
+    if robot_type not in ROBOT_CONFIGS:
+        raise ValueError(f"Unknown robot_type '{robot_type}'. Available robot types: {list(ROBOT_CONFIGS.keys())}")
     sub_keys = ROBOT_CONFIGS[robot_type].tactile_to_state_indices
     state_data = []
     for sub_key, indices in sub_keys.items():

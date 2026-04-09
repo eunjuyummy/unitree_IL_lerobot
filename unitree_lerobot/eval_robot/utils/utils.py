@@ -13,8 +13,8 @@ from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 
 import logging_mp
 
-logging_mp.basicConfig(level=logging_mp.INFO)
-logger_mp = logging_mp.getLogger(__name__)
+logging_mp.basic_config(level=logging_mp.INFO)
+logger_mp = logging_mp.get_logger(__name__)
 
 
 def extract_observation(step: dict):

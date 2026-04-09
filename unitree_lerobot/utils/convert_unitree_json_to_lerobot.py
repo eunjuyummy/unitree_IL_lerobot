@@ -63,6 +63,10 @@ class JsonDataset:
         # Initialize paths and cache
         self._init_paths()
         self._init_cache()
+        if robot_type not in ROBOT_CONFIGS:
+            raise ValueError(
+                f"Unknown robot_type '{robot_type}'. Available robot types: {list(ROBOT_CONFIGS.keys())}"
+            )
         self.json_state_data_name = ROBOT_CONFIGS[robot_type].json_state_data_name
         self.json_action_data_name = ROBOT_CONFIGS[robot_type].json_action_data_name
         self.camera_to_image_key = ROBOT_CONFIGS[robot_type].camera_to_image_key
