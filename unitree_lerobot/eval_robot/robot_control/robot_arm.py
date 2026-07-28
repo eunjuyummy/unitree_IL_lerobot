@@ -29,6 +29,7 @@ class MotorState:
     def __init__(self):
         self.q = None
         self.dq = None
+        self.tau_est = None
 
 
 class G1_29_LowState:
@@ -159,6 +160,9 @@ class G1_29_ArmController:
                 for id in range(G1_29_Num_Motors):
                     lowstate.motor_state[id].q = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
+                    # tau_est (measured/estimated joint torque) is not present on every
+                    # SDK/firmware version, so fall back to 0.0 rather than fail here.
+                    lowstate.motor_state[id].tau_est = getattr(msg.motor_state[id], "tau_est", 0.0)
                 self.lowstate_buffer.SetData(lowstate)
             time.sleep(0.002)
 
@@ -225,6 +229,10 @@ class G1_29_ArmController:
     def get_current_dual_arm_dq(self):
         """Return current state dq of the left and right arm motors."""
         return np.array([self.lowstate_buffer.GetData().motor_state[id].dq for id in G1_29_JointArmIndex])
+
+    def get_current_dual_arm_tau(self):
+        """Return current estimated tau (torque) of the left and right arm motors."""
+        return np.array([self.lowstate_buffer.GetData().motor_state[id].tau_est for id in G1_29_JointArmIndex])
 
     def ctrl_dual_arm_go_home(self):
         """Move both the left and right arms of the robot to their home position by setting the target joint angles (q) and torques (tau) to zero."""

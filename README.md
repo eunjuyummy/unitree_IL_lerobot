@@ -253,6 +253,8 @@ To test your trained model on a real robot, you can use the eval_g1.py script lo
 # --ee: The type of end-effector, (e.g., dex3, dex1, inspire1, brainco).
 # --visualization: Whether to enable visualization; setting it to true enables it.
 # --send_real_robot: Whether to send commands to the real robot.
+# --save_data: Record every step (all camera views, qpos/qvel/torque, ee tactile/force, action) for failure-detection data collection.
+# --task_dir: Directory episodes are written to when --save_data=true.
 
 
 python unitree_lerobot/eval_robot/eval_g1.py  \
@@ -264,6 +266,22 @@ python unitree_lerobot/eval_robot/eval_g1.py  \
     --arm="G1_29" \
     --ee="dex3" \
     --visualization=true \
+    --save_data=true \
+    --task_dir="./data" \
+
+While the evaluation loop is running, type `r`+Enter at any time to move the arms back to the
+initial pose (the same pose used at startup) without stopping the policy loop -- useful for
+resetting between attempts. This works regardless of `--save_data`.
+
+With `--save_data=true`, additionally type `s`+Enter to label the current episode a success or
+`f`+Enter for failure -- either saves the episode, starts a new one, and resets the arms to the
+initial pose so the robot is ready for the next attempt. `q`+Enter stops recording (evaluation
+keeps running, but no reset happens).
+Each episode is written to `task_dir/episode_XXXX/` as camera-view JPGs plus a `data.json` with
+per-step `states`/`actions` (`qpos`, `qvel`, `torque` for arms; `qpos` for end-effectors) and, for
+`--ee=inspire1`, a `tactiles` field with raw touch/force readings. `qvel`/`torque` are currently only
+populated for `--arm=G1_29` (see `get_current_dual_arm_dq`/`get_current_dual_arm_tau` in
+`robot_control/robot_arm.py`); other arm types fall back to zeros.
 
 If you want to run inference tests in the unitree_sim_isaaclab simulation environment, please execute:
 

@@ -1,5 +1,8 @@
 import numpy as np
 import torch
+import queue
+import sys
+import threading
 from typing import Any
 from contextlib import nullcontext
 from copy import copy
@@ -112,6 +115,36 @@ def to_scalar(x):
     return float(x)
 
 
+class KeyboardCommandListener:
+    """Non-blocking single-key command reader for the real-robot eval loop (e.g. 'r' to
+    reset to the initial pose, 's'/'f'/'q' to label/stop episode recording). Runs on a
+    background thread so the ~30Hz control loop never blocks waiting on stdin.
+
+    Must not be constructed before any input() call the caller still needs to make --
+    both would read from stdin concurrently and race for the same line.
+
+    Usage: press a key + Enter; each press is drained once per control-loop iteration
+    via poll().
+    """
+
+    def __init__(self):
+        self._queue: queue.Queue[str] = queue.Queue()
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+
+    def _read_loop(self):
+        for line in sys.stdin:
+            key = line.strip().lower()
+            if key:
+                self._queue.put(key)
+
+    def poll(self) -> str | None:
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
+
+
 @dataclass
 class EvalRealConfig:
     repo_id: str
@@ -133,6 +166,10 @@ class EvalRealConfig:
     send_real_robot: bool = False
     use_dataset: bool = False
     dummy: bool = False  # Run in dummy mode without real hardware
+
+    # Failure-detection data recording (real robot)
+    save_data: bool = False  # Record every step (images, qpos/qvel/torque, tactile, action) to task_dir
+    task_dir: str = "./data"  # Root directory episodes are written to when save_data=true
 
     rename_map: dict[str, str] = field(default_factory=dict)
 

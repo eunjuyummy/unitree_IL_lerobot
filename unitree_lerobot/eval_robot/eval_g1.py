@@ -40,8 +40,11 @@ from unitree_lerobot.eval_robot.utils.utils import (
     to_list,
     to_scalar,
     EvalRealConfig,
+    KeyboardCommandListener,
 )
 from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visualization_data
+from unitree_lerobot.eval_robot.utils.episode_writer import EpisodeWriter
+from unitree_lerobot.eval_robot.utils.real_savedata_utils import process_data_add_real
 
 import logging_mp
 
@@ -69,11 +72,19 @@ def eval_policy(
         preprocessor.reset()
         postprocessor.reset()
 
+    episode_writer = None
+    command_listener = None
+    recording = False
+
     image_info = None
     try:
         # --- Setup Phase ---
         image_info = setup_image_client(cfg)
         robot_interface = setup_robot_interface(cfg)
+
+        if cfg.save_data:
+            head_shape = image_info["tv_img_shape"]  # (height, width, channels)
+            episode_writer = EpisodeWriter(cfg.task_dir, frequency=cfg.frequency, image_size=[head_shape[1], head_shape[0]])
 
         # Unpack interfaces for convenience
         arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof = (
@@ -96,6 +107,11 @@ def eval_policy(
         step = dataset[from_idx]
         init_arm_pose = step["observation.state"][:arm_dof].cpu().numpy()
 
+        def move_to_init_pose():
+            tau = arm_ik.solve_tau(init_arm_pose)
+            arm_ctrl.ctrl_dual_arm(init_arm_pose, tau)
+            time.sleep(1.0)  # Give time for the robot to move
+
         user_input = input("Enter 's' to initialize the robot and start the evaluation: ")
         idx = 0
         print(f"user_input: {user_input}")
@@ -103,9 +119,21 @@ def eval_policy(
         if user_input.lower() == "s":
             # "The initial positions of the robot's arm and fingers take the initial positions during data recording."
             logger_mp.info("Initializing robot to starting pose...")
-            tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
-            robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
-            time.sleep(1.0)  # Give time for the robot to move
+            move_to_init_pose()
+            # NOTE: this reads stdin on a background thread, so it must not start until after
+            # the input() call above has consumed its line -- otherwise the two stdin readers
+            # race and the prompt above can hang forever.
+            command_listener = KeyboardCommandListener()
+            info_msg = "Type 'r'+Enter at any time to move the arms back to the initial pose."
+            if episode_writer is not None:
+                episode_writer.create_episode()
+                recording = True
+                info_msg += (
+                    " Type 's'+Enter to label the current episode a success, 'f'+Enter for "
+                    "failure, or 'q'+Enter to stop recording -- labeling with 's'/'f' also "
+                    "resets the arms to the initial pose for the next attempt."
+                )
+            logger_mp.info(info_msg)
             # --- Run Main Loop ---
             logger_mp.info(f"Starting evaluation loop at {cfg.frequency} Hz.")
             while True:
@@ -155,6 +183,71 @@ def eval_policy(
                         ee_shared_mem["left"].value = to_scalar(left_ee_action)
                         ee_shared_mem["right"].value = to_scalar(right_ee_action)
 
+                # Record this timestep for failure-detection data collection
+                if recording:
+                    images_to_save = {"cam_top": observation["observation.images.cam_left_high"]}
+                    if is_binocular:
+                        current_tv_image = tv_img_array.copy()
+                        images_to_save["cam_top"] = current_tv_image[:, : tv_img_shape[1] // 2]
+                        images_to_save["cam_top_right"] = current_tv_image[:, tv_img_shape[1] // 2 :]
+                    if has_wrist_cam:
+                        current_wrist_image = wrist_img_array.copy()
+                        images_to_save["cam_wrist_left"] = current_wrist_image[:, : wrist_img_shape[1] // 2]
+                        images_to_save["cam_wrist_right"] = current_wrist_image[:, wrist_img_shape[1] // 2 :]
+
+                    current_arm_dq = (
+                        arm_ctrl.get_current_dual_arm_dq() if hasattr(arm_ctrl, "get_current_dual_arm_dq") else None
+                    )
+                    current_arm_tau = (
+                        arm_ctrl.get_current_dual_arm_tau() if hasattr(arm_ctrl, "get_current_dual_arm_tau") else None
+                    )
+                    ee_touch = ee_force = None
+                    if cfg.ee:
+                        with ee_shared_mem["lock"]:
+                            if "touch" in ee_shared_mem:
+                                ee_touch = np.array(ee_shared_mem["touch"][:])
+                            if "force" in ee_shared_mem:
+                                ee_force = np.array(ee_shared_mem["force"][:])
+
+                    process_data_add_real(
+                        episode_writer,
+                        images_to_save,
+                        current_arm_q,
+                        current_arm_dq,
+                        current_arm_tau,
+                        full_state,
+                        action_np,
+                        arm_dof,
+                        ee_dof,
+                        timestamp=time.time(),
+                        ee_touch=ee_touch,
+                        ee_force=ee_force,
+                    )
+
+                # Drain any command typed on stdin (independent of recording state)
+                key = command_listener.poll()
+                if key == "r":
+                    logger_mp.info("Moving back to the initial pose...")
+                    move_to_init_pose()
+                    logger_mp.info("Reached initial pose. Resuming policy control.")
+                elif key in ("s", "f"):
+                    if episode_writer is not None:
+                        result = "success" if key == "s" else "fail"
+                        episode_writer.save_episode(result)
+                        logger_mp.info(f"Episode labeled '{result}'. Saving, then resetting to the initial pose...")
+                        while not episode_writer.is_available:
+                            time.sleep(0.01)
+                        episode_writer.create_episode()
+                        recording = True
+                        move_to_init_pose()
+                        logger_mp.info("Reached initial pose. New episode recording started.")
+                    else:
+                        logger_mp.info(f"Ignoring '{key}': recording is not enabled (pass --save_data=true).")
+                elif key == "q":
+                    if recording:
+                        recording = False
+                        logger_mp.info("Recording stopped (evaluation loop keeps running).")
+
                 if cfg.visualization:
                     visualization_data(idx, observation, state_tensor.numpy(), action_np, rerun_logger)
                 idx += 1
@@ -168,6 +261,8 @@ def eval_policy(
     finally:
         if image_info:
             cleanup_resources(image_info)
+        if episode_writer is not None:
+            episode_writer.close()
 
 
 @parser.wrap()
